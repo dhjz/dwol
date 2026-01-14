@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>局域网唤醒工具</title>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div id="app">
+    <div v-if="loading" class="container">
+      <div class="login-box">
+        <div class="login-title">⏳ 加载中...</div>
+      </div>
+    </div>
+
+    <div v-else-if="!isLoggedIn && passwordRequired" class="container">
+      <div class="login-box">
+        <div class="login-title">🔐 登录验证</div>
+        <div class="form-group">
+          <input type="password" v-model="password" @keyup.enter="login" class="form-input" placeholder="请输入密码">
+        </div>
+        <button @click="login" class="btn btn-blue btn-full">登录</button>
+      </div>
+    </div>
+
+    <div v-else class="container">
+      <header class="header">
+        <div class="title">⚡ 局域网唤醒工具</div>
+        <div class="subtitle">Wake on LAN Tool</div>
+      </header>
+
+      <div class="top-actions">
+        <div @click="toggleTheme" class="top-action">{{ isDarkMode ? '☀️' : '🌙' }}</div>
+        <div v-if="passwordRequired" @click="logout" class="top-action">🚪</div>
+      </div>
+
+      <div class="toolbar">
+        <button @click="showAddModal = true" class="btn btn-blue">➕ 添加主机</button>
+        <button @click="checkStatus" class="btn btn-purple">🔍 检查状态</button>
+        <button @click="exportData" class="btn">📤 导出数据</button>
+        <button @click="triggerImport" class="btn">📥 导入数据</button>
+        <input type="file" ref="fileInput" @change="importData" accept=".json" style="display: none;">
+      </div>
+
+      <div v-if="machines.length === 0" class="empty-state">
+        <div class="empty-icon">💻</div>
+        <p>暂无主机，点击"添加主机"开始使用</p>
+      </div>
+
+      <div v-else class="machine-list">
+        <div v-for="machine in machines" :key="machine.id" class="machine-item">
+          <div class="machine-info">
+            <div class="machine-name">
+              {{ machine.name ? machine.name + ' - ' + machine.host : machine.host }}
+              <span v-if="machine.status" class="status-badge" :class="'status-' + machine.status">
+                {{ getStatusText(machine.status) }} <span v-if="machine.statusMethod"> ({{ machine.statusMethod }})</span>
+              </span>
+            </div>
+            <div class="machine-detail">
+              <span>🌐 {{ machine.mac }}</span>
+              <span>🔌 端口: {{ machine.port }}</span>
+            </div>
+          </div>
+          <div class="machine-actions">
+            <button @click="confirmWake(machine)" class="btn btn-green">⚡ 唤醒</button>
+            <button @click="testPort(machine)" class="btn">🔌 测试</button>
+            <button @click="editMachine(machine)" class="btn">✏️</button>
+            <button @click="deleteMachine(machine.id)" class="btn btn-red">🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAddModal" class="modal-overlay" @click.self="showAddModal = false">
+      <div class="modal">
+        <div class="modal-title">{{ editingMachine ? '编辑主机' : '添加主机' }}</div>
+        <div class="form-group">
+          <input type="text" v-model="form.host" class="form-input" placeholder="主机地址 (IP或域名，可选)">
+        </div>
+        <div class="form-group">
+          <input type="text" v-model="form.mac" class="form-input" placeholder="MAC地址 (支持:或-分隔或无分隔)">
+        </div>
+        <div class="form-group">
+          <input type="number" v-model="form.port" class="form-input" placeholder="网络端口 (默认9)">
+        </div>
+        <div class="form-group">
+          <input type="text" v-model="form.name" class="form-input" placeholder="设备名称 (可选)">
+        </div>
+        <div class="modal-buttons">
+          <button @click="closeModal" class="btn">取消</button>
+          <button @click="saveMachine" class="btn btn-green">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showWakeModal" class="modal-overlay" @click.self="showWakeModal = false">
+      <div class="modal">
+        <div class="modal-title">⚡ 确认唤醒</div>
+        <p style="color: #aaa; margin-bottom: 20px;">
+          确定要唤醒主机 <strong style="color: #00f5ff;">{{ selectedMachine?.name || selectedMachine?.host || '未命名主机' }}</strong> 吗？
+        </p>
+        <div class="modal-buttons">
+          <button @click="showWakeModal = false" class="btn">取消</button>
+          <button @click="wakeMachine" class="btn btn-green">确认唤醒</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="vue.global.prod.js"></script>
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          loading: true,
+          isLoggedIn: false,
+          passwordRequired: false,
+          password: '',
+          isDarkMode: true,
+          machines: [],
+          showAddModal: false,
+          showWakeModal: false,
+          selectedMachine: null,
+          editingMachine: null,
+          form: {
+            id: '',
+            name: '',
+            host: '',
+            mac: '',
+            port: 9
+          }
+        };
+      },
+      mounted() {
+        this.loadTheme();
+        this.checkAuthStatus();
+      },
+      methods: {
+        loadTheme() {
+          const savedTheme = localStorage.getItem('wol_theme');
+          if (savedTheme !== null) {
+            this.isDarkMode = savedTheme === 'dark';
+          } else {
+            this.isDarkMode = true;
+          }
+          this.applyTheme();
+        },
+        applyTheme() {
+          if (this.isDarkMode) {
+            document.body.classList.remove('light-mode');
+          } else {
+            document.body.classList.add('light-mode');
+          }
+        },
+        toggleTheme() {
+          this.isDarkMode = !this.isDarkMode;
+          localStorage.setItem('wol_theme', this.isDarkMode ? 'dark' : 'light');
+          this.applyTheme();
+        },
+        async checkAuthStatus() {
+          try {
+            const response = await fetch('/api/auth/status');
+            if (response.ok) {
+              const data = await response.json();
+              this.passwordRequired = data.required;
+              
+              if (!this.passwordRequired) {
+                this.isLoggedIn = true;
+                await this.loadMachines();
+                this.checkStatus()
+              } else {
+                const savedPassword = localStorage.getItem('wol_password');
+                if (savedPassword) {
+                  await this.verifyPassword(savedPassword);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Failed to check auth status:', error);
+          } finally {
+            this.loading = false;
+          }
+        },
+        async verifyPassword(pwd) {
+          try {
+            const response = await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: pwd })
+            });
+
+            if (response.ok) {
+              this.isLoggedIn = true;
+              this.password = pwd;
+              localStorage.setItem('wol_password', pwd);
+              await this.loadMachines();
+              this.checkStatus()
+              return true;
+            }
+            return false;
+          } catch (error) {
+            console.error('Failed to verify password:', error);
+            return false;
+          }
+        },
+        async login() {
+          if (!this.password.trim()) {
+            alert('请输入密码');
+            return;
+          }
+
+          const success = await this.verifyPassword(this.password);
+          if (!success) {
+            alert('密码错误');
+          }
+        },
+        logout() {
+          localStorage.removeItem('wol_password');
+          this.isLoggedIn = false;
+          this.password = '';
+          this.machines = [];
+        },
+        async loadMachines() {
+          try {
+            const response = await fetch('/api/machines');
+            if (response.ok) {
+              this.machines = await response.json();
+            }
+          } catch (error) {
+            console.error('Failed to load machines:', error);
+          }
+        },
+        async saveMachine() {
+          if (!this.form.mac.trim()) {
+            alert('MAC地址不能为空');
+            return;
+          }
+
+          const machine = {
+            id: this.form.id || Date.now().toString(),
+            name: this.form.name.trim(),
+            host: this.form.host.trim(),
+            mac: this.form.mac.trim(),
+            port: parseInt(this.form.port) || 9
+          };
+
+          try {
+            const method = this.editingMachine ? 'PUT' : 'POST';
+            const response = await fetch('/api/machines', {
+              method: method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(machine)
+            });
+
+            if (response.ok) {
+              await this.loadMachines();
+              this.closeModal();
+            } else {
+              alert('保存失败');
+            }
+          } catch (error) {
+            console.error('Failed to save machine:', error);
+            alert('保存失败');
+          }
+        },
+        closeModal() {
+          this.showAddModal = false;
+          this.resetForm();
+        },
+        editMachine(machine) {
+          this.editingMachine = machine;
+          this.form = {
+            id: machine.id,
+            name: machine.name,
+            host: machine.host,
+            mac: machine.mac,
+            port: machine.port
+          };
+          this.showAddModal = true;
+        },
+        async deleteMachine(id) {
+          if (!confirm('确定要删除该主机吗？')) {
+            return;
+          }
+
+          try {
+            const response = await fetch(`/api/machines?id=${id}`, {
+              method: 'DELETE'
+            });
+
+            if (response.ok) {
+              await this.loadMachines();
+            } else {
+              alert('删除失败');
+            }
+          } catch (error) {
+            console.error('Failed to delete machine:', error);
+            alert('删除失败');
+          }
+        },
+        confirmWake(machine) {
+          this.selectedMachine = machine;
+          this.showWakeModal = true;
+        },
+        async wakeMachine() {
+          if (!this.selectedMachine) return;
+
+          try {
+            const response = await fetch('/api/wake', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: this.selectedMachine.id })
+            });
+
+            if (response.ok) {
+              alert('唤醒成功！');
+              await this.loadMachines();
+            } else {
+              alert('唤醒失败');
+            }
+          } catch (error) {
+            console.error('Failed to wake machine:', error);
+            alert('唤醒失败');
+          }
+
+          this.showWakeModal = false;
+          this.selectedMachine = null;
+        },
+        async exportData() {
+          try {
+            const response = await fetch('/api/export');
+            if (response.ok) {
+              const blob = await response.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'machines.json';
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+          } catch (error) {
+            console.error('Failed to export data:', error);
+            alert('导出失败');
+          }
+        },
+        triggerImport() {
+          this.$refs.fileInput.click();
+        },
+        async importData(event) {
+          const file = event.target.files[0];
+          if (!file) return;
+
+          try {
+            const text = await file.text();
+            const machines = JSON.parse(text);
+
+            const response = await fetch('/api/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(machines)
+            });
+
+            if (response.ok) {
+              alert('导入成功');
+              await this.loadMachines();
+            } else {
+              alert('导入失败');
+            }
+          } catch (error) {
+            console.error('Failed to import data:', error);
+            alert('导入失败：文件格式错误');
+          }
+
+          event.target.value = '';
+        },
+        resetForm() {
+          this.form = {
+            id: '',
+            name: '',
+            host: '',
+            mac: '',
+            port: 9
+          };
+          this.editingMachine = null;
+        },
+        async checkStatus() {
+          try {
+            const response = await fetch('/api/status');
+            if (response.ok) {
+              const statuses = await response.json();
+              
+              this.machines.forEach(machine => {
+                const status = statuses.find(s => s.id === machine.id);
+                if (status) {
+                  machine.status = status.status;
+                  machine.statusMethod = status.method;
+                }
+              });
+            } else {
+              alert('检查状态失败');
+            }
+          } catch (error) {
+            console.error('Failed to check status:', error);
+            alert('检查状态失败');
+          }
+        },
+        getStatusText(status) {
+          const statusMap = {
+            'online': '🟢',
+            'offline': '🔴',
+            'unknown': '⚪'
+          };
+          return statusMap[status] || '⚪';
+        },
+        async testPort(machine) {
+          if (!machine.host) {
+            alert('该主机没有设置IP地址，无法测试端口');
+            return;
+          }
+
+          const port = prompt(`请输入要测试的端口号 (1-65535)（超时时间3秒）:`, '80');
+          if (port === null) {
+            return;
+          }
+
+          const portNum = parseInt(port);
+          if (isNaN(portNum) || portNum <= 0 || portNum > 65535) {
+            alert('端口号无效，请输入1-65535之间的数字');
+            return;
+          }
+
+          try {
+            const response = await fetch('/api/test-port', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ host: machine.host, port: portNum })
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              if (result.connected) {
+                alert(`✅ 端口 ${portNum} 连接成功！`);
+              } else {
+                alert(`❌ 端口 ${portNum} 连接失败或超时`);
+              }
+            } else {
+              alert('测试端口失败');
+            }
+          } catch (error) {
+            console.error('Failed to test port:', error);
+            alert('测试端口失败');
+          }
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

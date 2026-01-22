@@ -29,6 +29,7 @@ for %%f in (dist\*) do (
 )
 
 if not "%1"=="true" (
+    if exist "dist\%APP_NAME%" del /Q "dist\%APP_NAME%"
     ren "dist\%APP_NAME%_%MAIN_LINUX_ARCH%" "%APP_NAME%"
 )
 

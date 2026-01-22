@@ -107,7 +107,9 @@ func HandleWake(w http.ResponseWriter, r *http.Request) {
 
 	broadcast := "255.255.255.255"
 	if target.Host != "" {
-		broadcast = target.Host
+		if !isPrivateIP(target.Host) {
+			broadcast = target.Host
+		}
 	}
 
 	// log.Printf("Sending WOL packet to %s (MAC: %s, Port: %d, Broadcast: %s)", target.Host, target.MAC, target.Port, broadcast)
@@ -183,4 +185,17 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	} else {
 		sendError(w, "Invalid password", http.StatusUnauthorized)
 	}
+}
+
+func isPrivateIP(ip string) bool {
+	if strings.HasPrefix(ip, "192.") {
+		return true
+	}
+	if strings.HasPrefix(ip, "10.") {
+		return true
+	}
+	if strings.HasPrefix(ip, "172.") {
+		return true
+	}
+	return false
 }

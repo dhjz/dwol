@@ -13,6 +13,7 @@ dist
 dist-ssr
 coverage
 *.local
+*.exe
 
 /cypress/videos/
 /cypress/screenshots/
@@ -27,3 +28,4 @@ coverage
 *.sln
 *.sw?
 data.json
+cron.json

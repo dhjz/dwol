@@ -106,9 +106,9 @@ func checkMachineStatus(machine Machine) MachineStatus {
 		method string
 	}
 
-	resultChan := make(chan checkResult, 3)
+	resultChan := make(chan checkResult, 4)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 
 	go func() {
 		defer wg.Done()
@@ -121,6 +121,13 @@ func checkMachineStatus(machine Machine) MachineStatus {
 		defer wg.Done()
 		if checkPort(machine.Host, 22, 2*time.Second) {
 			resultChan <- checkResult{status: "online", method: "ssh"}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		if checkPort(machine.Host, 80, 2*time.Second) {
+			resultChan <- checkResult{status: "online", method: "http"}
 		}
 	}()
 

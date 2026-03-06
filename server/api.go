@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 )
 
 func setJSONHeader(w http.ResponseWriter) {
@@ -181,10 +182,120 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if CheckPassword(req.Password) {
-		sendJSON(w, map[string]string{"status": "success"})
+		token := GenerateToken()
+		sendJSON(w, map[string]string{"status": "success", "token": token})
 	} else {
 		sendError(w, "Invalid password", http.StatusUnauthorized)
 	}
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !IsPasswordRequired() {
+			next(w, r)
+			return
+		}
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if !ValidateToken(token) {
+			sendError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return authMiddleware(next)
+}
+
+func HandleCronTasks(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		tasks := GetCronTasks()
+		sendJSON(w, tasks)
+	case http.MethodPost:
+		var task CronTask
+		if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+			sendError(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+		if task.ID == "" || task.MachineID == "" || task.CronExpr == "" {
+			sendError(w, "ID, MachineID and CronExpr are required", http.StatusBadRequest)
+			return
+		}
+		if !ValidateCronExpr(task.CronExpr) {
+			sendError(w, "Invalid cron expression", http.StatusBadRequest)
+			return
+		}
+		if err := AddCronTask(task); err != nil {
+			sendError(w, "Failed to add cron task", http.StatusInternalServerError)
+			return
+		}
+		sendJSON(w, task)
+	case http.MethodPut:
+		var task CronTask
+		if err := json.NewDecoder(r.Body).Decode(&task); err != nil {
+			sendError(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+		if task.ID == "" || task.MachineID == "" || task.CronExpr == "" {
+			sendError(w, "ID, MachineID and CronExpr are required", http.StatusBadRequest)
+			return
+		}
+		if !ValidateCronExpr(task.CronExpr) {
+			sendError(w, "Invalid cron expression", http.StatusBadRequest)
+			return
+		}
+		if err := UpdateCronTask(task); err != nil {
+			sendError(w, "Failed to update cron task", http.StatusInternalServerError)
+			return
+		}
+		sendJSON(w, task)
+	case http.MethodDelete:
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			sendError(w, "ID is required", http.StatusBadRequest)
+			return
+		}
+		if err := DeleteCronTask(id); err != nil {
+			sendError(w, "Failed to delete cron task", http.StatusInternalServerError)
+			return
+		}
+		sendJSON(w, map[string]string{"status": "deleted"})
+	default:
+		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func HandleValidateCron(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		sendError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CronExpr string `json:"cronExpr"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if !ValidateCronExpr(req.CronExpr) {
+		sendJSON(w, map[string]bool{"valid": false})
+		return
+	}
+
+	nextRun, err := GetNextRun(req.CronExpr)
+	if err != nil {
+		sendJSON(w, map[string]bool{"valid": false})
+		return
+	}
+
+	sendJSON(w, map[string]interface{}{"valid": true, "nextRun": nextRun})
 }
 
 func isPrivateIP(ip string) bool {

@@ -8,8 +8,9 @@
 - ⚡ WOL唤醒发送Magic Packet
 - 🔍 服务器状态检测（ping/SSH/RDP并发检测）
 - 🔌 端口连通性测试（3秒超时）
+- ⏰ 定时唤醒任务（支持Cron表达式）
 - 📤 数据导入导出（JSON格式）
-- 🔐 密码保护功能
+- 🔐 密码保护功能（可选）
 - 🌙 深色/浅色主题切换
 
 ## 系统要求
@@ -50,6 +51,9 @@ dwol.exe -p 8080 -pwd mypassword
 ### 数据导入导出
 点击"📤 导出数据"导出JSON文件，点击"📥 导入数据"导入JSON文件。
 
+### 定时唤醒
+点击"⏰ 定时任务"管理定时唤醒任务，支持Cron表达式设置自动唤醒时间。
+
 ### 主题切换
 点击右上角 🌙/☀️ 图标切换主题。
 
@@ -59,14 +63,23 @@ dwol.exe -p 8080 -pwd mypassword
 2. 唤醒主机和被唤醒主机必须在同一局域网
 3. 确保防火墙允许相关端口通信
 4. MAC地址支持多种格式：`00:11:22:33:44:55`、`00-11-22-33-44-55`、`001122334455`
+5. 默认端口为9，可自定义WOL广播端口
 
 ## 技术栈
 
 - 后端：Go 1.24.11
 - 前端：Vue 3
 - 样式：原生CSS
+- 定时任务：内置Cron解析器
 
 ## 其他说明
+
 - 页面效果图见`appimg`目录
 - <img src="https://gcore.jsdelivr.net/gh/dhjz/dwol@master/appimg/app1.jpg" style="width: 340px;"/>
 - <img src="https://gcore.jsdelivr.net/gh/dhjz/dwol@master/appimg/app2.jpg" style="width: 340px;"/>
+
+## 数据存储
+
+- 主机数据：程序目录下的`data.json`
+- 定时任务：程序目录下的`cron.json`
+- 建议定期备份这两个数据文件
